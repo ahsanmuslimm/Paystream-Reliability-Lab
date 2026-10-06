@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: notifier
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://postgres:5432/paystream}
+    username: ${POSTGRES_USER:paystream}
+    password: ${POSTGRES_PASSWORD:paystream}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-1:29092,kafka-2:29092,kafka-3:29092}
+    consumer:
+      group-id: notifier
+      # Document 03 section 5.3 consumer baselines
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      properties:
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
+        specific.avro.reader: true
+        session.timeout.ms: 45000
+        max.poll.interval.ms: 300000
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
+        isolation.level: read_committed
+    producer:
+      client-id: notifier
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      acks: all
+      enable-idempotence: true
+      compression-type: lz4
+      properties:
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
+        linger.ms: 10
+
+server:
+  port: 8083
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+paystream:
+  topics:
+    notifications: bank.notifications.v1
+  account-pool-size: ${ACCOUNT_POOL_SIZE:200}
+
+logging:
+  level:
+    root: INFO
+    org.apache.kafka: WARN

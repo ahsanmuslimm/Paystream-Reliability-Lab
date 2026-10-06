@@ -1,0 +1,209 @@
+# PayStream Reliability Lab - core stack (profile: core)
+# Three-broker Apache Kafka 4.0.0 cluster in KRaft combined mode (ADR-0001),
+# Confluent Schema Registry (community licence) and PostgreSQL.
+#
+# Run from the repository root:  make up
+# Broker baselines implement Document 03 section 5.1 (FR-02):
+# auto-creation disabled, RF 3, unclean leader election disabled.
+# Security (mTLS/SCRAM/ACLs) is added by docker-compose.security.yml (Stage 2).
+
+name: paystream
+
+x-broker-common: &broker-common
+  image: ${KAFKA_IMAGE:-apache/kafka:4.0.0}
+  restart: unless-stopped
+  environment: &broker-env
+    KAFKA_PROCESS_ROLES: broker,controller
+    KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:29093,2@kafka-2:29093,3@kafka-3:29093
+    KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+    KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+    KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:19092
+    KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS:--Xmx1g -Xms1g}
+    # --- Document 03 section 5.1 broker baselines (all environments) ---
+    KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+    KAFKA_MIN_INSYNC_REPLICAS: 2
+    KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: "false"
+    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+    KAFKA_LOG_RETENTION_HOURS: 168
+    KAFKA_DELETE_TOPIC_ENABLE: "true"
+    KAFKA_NUM_PARTITIONS: 3
+    KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+  healthcheck:
+    test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 >/dev/null 2>&1"]
+    interval: 10s
+    timeout: 10s
+    retries: 12
+    start_period: 30s
+
+services:
+  kafka-1:
+    <<: *broker-common
+    container_name: kafka-1
+    environment:
+      <<: *broker-env
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:${KAFKA_1_HOST_PORT:-19091}
+    ports:
+      - "${KAFKA_1_HOST_PORT:-19091}:19092"
+    volumes:
+      - kafka-1-data:/var/lib/kafka/data
+
+  kafka-2:
+    <<: *broker-common
+    container_name: kafka-2
+    environment:
+      <<: *broker-env
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29092,PLAINTEXT_HOST://localhost:${KAFKA_2_HOST_PORT:-19092}
+    ports:
+      - "${KAFKA_2_HOST_PORT:-19092}:19092"
+    volumes:
+      - kafka-2-data:/var/lib/kafka/data
+
+  kafka-3:
+    <<: *broker-common
+    container_name: kafka-3
+    environment:
+      <<: *broker-env
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29092,PLAINTEXT_HOST://localhost:${KAFKA_3_HOST_PORT:-19093}
+    ports:
+      - "${KAFKA_3_HOST_PORT:-19093}:19092"
+    volumes:
+      - kafka-3-data:/var/lib/kafka/data
+
+  schema-registry:
+    image: ${SCHEMA_REGISTRY_IMAGE:-confluentinc/cp-schema-registry:7.9.0}
+    container_name: schema-registry
+    restart: unless-stopped
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka-1:29092,kafka-2:29092,kafka-3:29092
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 3
+      SCHEMA_REGISTRY_HEAP_OPTS: ${SCHEMA_REGISTRY_HEAP_OPTS:--Xmx512m -Xms256m}
+    ports:
+      - "${SCHEMA_REGISTRY_HOST_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8081/subjects >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-paystream}
+      POSTGRES_USER: ${POSTGRES_USER:-paystream}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-paystream}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-paystream} -d ${POSTGRES_DB:-paystream}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ---- Application workload ----
+
+  txn-producer:
+    build:
+      context: ../../services
+      dockerfile: txn-producer/Dockerfile
+    image: ${TXN_PRODUCER_IMAGE:-paystream/txn-producer:0.1.0}
+    container_name: txn-producer
+    restart: unless-stopped
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      TXN_PRODUCER_RATE_PER_SECOND: ${TXN_PRODUCER_RATE_PER_SECOND:-100}
+      ACCOUNT_POOL_SIZE: ${ACCOUNT_POOL_SIZE:-200}
+      JAVA_OPTS: ${SERVICE_JAVA_OPTS:--Xmx512m}
+    ports:
+      - "${TXN_PRODUCER_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  fraud-detector:
+    build:
+      context: ../../services
+      dockerfile: fraud-detector/Dockerfile
+    image: ${FRAUD_DETECTOR_IMAGE:-paystream/fraud-detector:0.1.0}
+    container_name: fraud-detector
+    restart: unless-stopped
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      FRAUD_AMOUNT_THRESHOLD: ${FRAUD_AMOUNT_THRESHOLD:-10000}
+      JAVA_OPTS: ${SERVICE_JAVA_OPTS:--Xmx512m}
+    ports:
+      - "${FRAUD_DETECTOR_HOST_PORT:-8082}:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  notifier:
+    build:
+      context: ../../services
+      dockerfile: notifier/Dockerfile
+    image: ${NOTIFIER_IMAGE:-paystream/notifier:0.1.0}
+    container_name: notifier
+    restart: unless-stopped
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-paystream}
+      POSTGRES_USER: ${POSTGRES_USER:-paystream}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-paystream}
+      ACCOUNT_POOL_SIZE: ${ACCOUNT_POOL_SIZE:-200}
+      JAVA_OPTS: ${SERVICE_JAVA_OPTS:--Xmx512m}
+    ports:
+      - "${NOTIFIER_HOST_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+
+volumes:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:
+  postgres-data:

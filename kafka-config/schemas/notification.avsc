@@ -1,0 +1,14 @@
+{
+  "type": "record",
+  "name": "Notification",
+  "namespace": "bank.events",
+  "fields": [
+    {"name": "notification_id", "type": {"type": "string", "logicalType": "uuid"}},
+    {"name": "customer_id", "type": {"type": "string", "logicalType": "uuid"}},
+    {"name": "alert_id", "type": {"type": "string", "logicalType": "uuid"}},
+    {"name": "channel", "type": {"type": "enum", "name": "NotifyChannel",
+                                 "symbols": ["SMS", "EMAIL", "PUSH"]}},
+    {"name": "created_at", "type": {"type": "long",
+                                    "logicalType": "timestamp-millis"}}
+  ]
+}

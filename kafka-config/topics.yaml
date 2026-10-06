@@ -1,0 +1,78 @@
+# PayStream Reliability Lab - Topic Catalogue (source of truth)
+# Implements Document 03 (Backend Schema) section 1.
+# Applied by kafka-config/scripts/apply-topics.sh; validated by validate-config.py in CI.
+# Naming standard: <domain>.<entity>.v<N> with .retry / .dlq suffixes.
+# Auto-creation is DISABLED on brokers; any topic not listed here must fail CI (FR-02).
+
+topics:
+  - name: bank.transactions.v1
+    partitions: 6
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      retention.ms: "604800000"        # 7 days, delete
+      cleanup.policy: delete
+
+  - name: bank.fraud-alerts.v1
+    partitions: 3
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      retention.ms: "2592000000"       # 30 days, delete
+      cleanup.policy: delete
+
+  - name: bank.notifications.v1
+    partitions: 3
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      retention.ms: "259200000"        # 3 days, delete
+      cleanup.policy: delete
+
+  - name: bank.transactions.v1.retry
+    partitions: 3
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      retention.ms: "86400000"         # 1 day, delete
+      cleanup.policy: delete
+
+  - name: bank.transactions.v1.dlq
+    partitions: 3
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      retention.ms: "1209600000"       # 14 days, delete
+      cleanup.policy: delete
+
+  - name: pg.public.accounts
+    partitions: 3
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      cleanup.policy: compact          # CDC topic, compacted
+
+  - name: connect-configs
+    partitions: 1
+    replication-factor: 3
+    config:
+      cleanup.policy: compact
+
+  - name: connect-offsets
+    partitions: 25
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      cleanup.policy: compact
+
+  - name: connect-status
+    partitions: 5
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      cleanup.policy: compact
+
+# Kafka Streams internal topics (fraud-detector-*) are created by the Streams
+# runtime with RF=3 via consumer property replication.factor; they follow the
+# prefix rule in the ACL matrix and are deliberately NOT listed here because
+# their names contain state-store changelog suffixes managed by the topology.

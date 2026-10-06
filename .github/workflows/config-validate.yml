@@ -1,0 +1,28 @@
+name: config-validate
+
+on:
+  pull_request:
+    paths:
+      - "kafka-config/**"
+      - "infra/compose/**"
+      - "monitoring/**"
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Topic/ACL/schema validation (FR-02, FR-16)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run configuration validation
+        run: python kafka-config/scripts/validate-config.py
+
+      - name: Report topic catalogue
+        run: bash kafka-config/scripts/apply-topics.sh --dry-run

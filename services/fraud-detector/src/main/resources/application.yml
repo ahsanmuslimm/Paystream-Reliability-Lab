@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: fraud-detector
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-1:29092,kafka-2:29092,kafka-3:29092}
+    streams:
+      application-id: fraud-detector
+      properties:
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
+        replication.factor: 3
+        # malformed records are logged and skipped; full DLQ routing arrives
+        # with WP2.3 (Stage 2)
+        default.deserialization.exception.handler: org.apache.kafka.streams.errors.LogAndContinueExceptionHandler
+        state.dir: /tmp/kafka-streams
+        metrics.recording.level: INFO
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+paystream:
+  fraud:
+    amount-threshold: ${FRAUD_AMOUNT_THRESHOLD:10000}
+  schema-registry-url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
+
+logging:
+  level:
+    root: INFO
+    org.apache.kafka: WARN

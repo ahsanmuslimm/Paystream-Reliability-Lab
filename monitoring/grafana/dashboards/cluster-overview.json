@@ -1,0 +1,134 @@
+{
+  "title": "PayStream - Cluster Overview (MVP)",
+  "uid": "paystream-cluster-mvp",
+  "schemaVersion": 39,
+  "editable": true,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Brokers up",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "kafka_brokers", "legendFormat": "brokers" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Under-replicated partitions",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 0 },
+      "targets": [
+        { "expr": "sum(kafka_topic_partition_under_replicated_partition)", "legendFormat": "URP" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Transactions sent (rate/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(kafka_topic_partition_current_offset{topic=\"bank.transactions.v1\"}[1m])) * 60",
+          "legendFormat": "produced/s"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Consumer group lag (total)",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        { "expr": "sum(kafka_consumergroup_lag) by (consumergroup)", "legendFormat": "{{consumergroup}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Produce rate by topic (msg/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "expr": "sum(rate(kafka_topic_partition_current_offset[1m])) by (topic) * 60",
+          "legendFormat": "{{topic}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Alerts flowing (bank.fraud-alerts.v1 msg/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 6 },
+      "targets": [
+        {
+          "expr": "sum(rate(kafka_topic_partition_current_offset{topic=\"bank.fraud-alerts.v1\"}[1m])) * 60",
+          "legendFormat": "alerts/s"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Notifications published (bank.notifications.v1 msg/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 6 },
+      "targets": [
+        {
+          "expr": "sum(rate(kafka_topic_partition_current_offset{topic=\"bank.notifications.v1\"}[1m])) * 60",
+          "legendFormat": "notifications/s"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Service JVM heap used (bytes)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 13 },
+      "targets": [
+        { "expr": "sum(jvm_memory_used_bytes{area=\"heap\"}) by (job)", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Generator throughput (sent/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 13 },
+      "targets": [
+        {
+          "expr": "rate(paystream_transactions_sent_total[1m]) * 60",
+          "legendFormat": "sent/s"
+        },
+        {
+          "expr": "rate(paystream_transactions_failed_total[1m]) * 60",
+          "legendFormat": "failed/s"
+        }
+      ]
+    }
+  ]
+}

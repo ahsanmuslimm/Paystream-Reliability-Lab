@@ -1,0 +1,21 @@
+{
+  "type": "record",
+  "name": "Transaction",
+  "namespace": "bank.events",
+  "fields": [
+    {"name": "txn_id", "type": {"type": "string", "logicalType": "uuid"}},
+    {"name": "account_id", "type": {"type": "string", "logicalType": "uuid"}},
+    {"name": "amount", "type": {"type": "bytes", "logicalType": "decimal",
+                                "precision": 14, "scale": 2}},
+    {"name": "currency", "type": "string"},
+    {"name": "type", "type": {"type": "enum", "name": "TxnType",
+                              "symbols": ["DEBIT", "CREDIT", "TRANSFER"]}},
+    {"name": "channel", "type": {"type": "enum", "name": "Channel",
+                                 "symbols": ["ATM", "POS", "ONLINE", "BRANCH"]}},
+    {"name": "merchant_id", "type": ["null", "string"], "default": null},
+    {"name": "event_time", "type": {"type": "long",
+                                    "logicalType": "timestamp-millis"}},
+    {"name": "metadata", "type": ["null", {"type": "map", "values": "string"}],
+     "default": null}
+  ]
+}
