@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "FraudAlert",
+  "namespace": "bank.events",
+  "fields": [
+    {"name": "alert_id", "type": {"type": "string", "logicalType": "uuid"}},
+    {"name": "txn_id", "type": {"type": "string", "logicalType": "uuid"}},
+    {"name": "account_id", "type": {"type": "string", "logicalType": "uuid"}},
+    {"name": "rule_name", "type": "string"},
+    {"name": "severity", "type": {"type": "enum", "name": "Severity",
+                                  "symbols": ["LOW", "MEDIUM", "HIGH"]}},
+    {"name": "detected_at", "type": {"type": "long",
+                                     "logicalType": "timestamp-millis"}},
+    {"name": "details", "type": ["null", {"type": "map", "values": "string"}],
+     "default": null}
+  ]
+}

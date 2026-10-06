@@ -1,0 +1,22 @@
+# MVP alert rules - full rule set (lag, URP, offline partitions, disk, cert
+# expiry) arrives with WP2.5 in Stage 2. These cover the MVP gate panels.
+groups:
+  - name: kafka-mvp
+    rules:
+      - alert: KafkaClusterUnderReplicatedPartitions
+        expr: sum(kafka_topic_partition_under_replicated_partition) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Under-replicated partitions detected"
+          description: "URP count is {{ $value }} - a broker may be down or catching up."
+
+      - alert: KafkaBrokerCountBelowExpected
+        expr: kafka_brokers < 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka cluster has fewer than 3 brokers"
+          description: "Broker count is {{ $value }}; expected 3."

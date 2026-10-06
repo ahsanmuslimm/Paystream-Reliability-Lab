@@ -1,0 +1,59 @@
+# PayStream Reliability Lab - monitoring overlay (profile: monitoring)
+# MVP observability (WP1.7): kafka-exporter for broker/topic/consumer-group
+# metrics, Prometheus collection, provisioned Grafana dashboard.
+# Full alerting (Alertmanager, JMX exporter, Loki) arrives in Stage 2 (WP2.5).
+
+services:
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.10.0
+    container_name: kafka-exporter
+    restart: unless-stopped
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    command:
+      - "--kafka.server=kafka-1:29092"
+      - "--kafka.server=kafka-2:29092"
+      - "--kafka.server=kafka-3:29092"
+      - "--web.listen-address=:9308"
+    ports:
+      - "9308:9308"
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.4.1}
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ../../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    ports:
+      - "${PROMETHEUS_HOST_PORT:-9090}:9090"
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:12.0.0}
+    container_name: grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_HOST_PORT:-3000}:3000"
+
+volumes:
+  prometheus-data:
+  grafana-data:

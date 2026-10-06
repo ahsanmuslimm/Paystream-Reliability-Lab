@@ -1,0 +1,36 @@
+# Secrets and local environment
+.env
+*.env.local
+
+# Certificates and private keys (never commit)
+security/certs/
+*.p12
+*.jks
+*.key
+!*.pub
+
+# Build output
+target/
+build/
+*.class
+*.jar
+!**/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Logs and drill evidence working files (evidence for accepted drills is committed)
+*.log
+chaos/results/working/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker compose override
+docker-compose.override.yml

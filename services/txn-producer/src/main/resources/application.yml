@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: txn-producer
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka-1:29092,kafka-2:29092,kafka-3:29092}
+    producer:
+      client-id: txn-producer
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+      # Document 03 section 5.2 producer baselines
+      acks: all
+      enable-idempotence: true
+      compression-type: lz4
+      properties:
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
+        linger.ms: 10
+        delivery.timeout.ms: 120000
+        max.in.flight.requests.per.connection: 5
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+paystream:
+  topics:
+    transactions: bank.transactions.v1
+  produce:
+    rate-per-second: ${TXN_PRODUCER_RATE_PER_SECOND:100}
+    auto-start: ${TXN_PRODUCER_AUTO_START:true}
+    account-pool-size: ${ACCOUNT_POOL_SIZE:200}
+
+logging:
+  level:
+    root: INFO
+    org.apache.kafka: WARN

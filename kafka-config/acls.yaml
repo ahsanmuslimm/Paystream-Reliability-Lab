@@ -1,0 +1,83 @@
+# PayStream Reliability Lab - ACL Matrix (source of truth)
+# Implements Document 03 (Backend Schema) section 6.
+# Applied by kafka-config/scripts/apply-acls.sh (Stage 2, WP2.2); validated by
+# validate-config.py. Rules: no wildcard principals, no ALL on '*',
+# human users never use service credentials, default deny
+# (allow.everyone.if.no.acl.found=false).
+#
+# User:broker-N (mTLS) are cluster super users for inter-broker traffic only
+# and are configured via the security overlay, not here.
+
+acls:
+  - principal: User:svc-txn-producer
+    resource:
+      type: topic
+      name: bank.transactions.v1
+    operations: [WRITE, DESCRIBE]
+
+  - principal: User:svc-fraud
+    resource:
+      type: topic
+      name: bank.transactions.v1
+    operations: [READ, DESCRIBE]
+  - principal: User:svc-fraud
+    resource:
+      type: group
+      name: fraud-detector
+    operations: [READ]
+  - principal: User:svc-fraud
+    resource:
+      type: topic
+      name: bank.fraud-alerts.v1
+    operations: [WRITE, DESCRIBE]
+  - principal: User:svc-fraud
+    resource:
+      type: topic
+      name: bank.transactions.v1.retry
+    operations: [READ, WRITE, DESCRIBE]
+  - principal: User:svc-fraud
+    resource:
+      type: topic
+      name: bank.transactions.v1.dlq
+    operations: [READ, WRITE, DESCRIBE]
+  - principal: User:svc-fraud
+    resource:
+      type: topic
+      name: fraud-detector-
+      pattern: prefixed
+    operations: [ALL]
+
+  - principal: User:svc-notify
+    resource:
+      type: topic
+      name: bank.fraud-alerts.v1
+    operations: [READ, DESCRIBE]
+  - principal: User:svc-notify
+    resource:
+      type: group
+      name: notifier
+    operations: [READ]
+  - principal: User:svc-notify
+    resource:
+      type: topic
+      name: bank.notifications.v1
+    operations: [WRITE, DESCRIBE]
+
+  - principal: User:svc-connect
+    resource:
+      type: topic
+      name: pg.
+      pattern: prefixed
+    operations: [READ, WRITE, CREATE, DESCRIBE]
+  - principal: User:svc-connect
+    resource:
+      type: topic
+      name: connect-
+      pattern: prefixed
+    operations: [READ, WRITE, CREATE, DESCRIBE]
+
+  - principal: User:svc-admin-ci
+    resource:
+      type: cluster
+      name: kafka-cluster
+    operations: [CREATE, ALTER, DESCRIBE]
