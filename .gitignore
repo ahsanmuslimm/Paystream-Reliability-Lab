@@ -28,6 +28,7 @@ build/
 # Logs and drill evidence working files (evidence for accepted drills is committed)
 *.log
 chaos/results/working/
+diagnostics/
 
 # OS
 .DS_Store

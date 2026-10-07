@@ -73,9 +73,9 @@ One responsibility per directory (Document 04):
 | `infra/compose/` | Core stack + monitoring, security (WP2.1/WP2.2) and connect (WP2.4) overlays |
 | `security/` | PKI and SCRAM credential scripts (`scripts/`), generated material git-ignored |
 | `monitoring/` | Prometheus rules, Alertmanager, Loki/Promtail, JMX exporter config, Grafana dashboards |
-| `docs/` | ADRs, runbooks, drill reports, security docs, deployment guide, performance baseline |
+| `docs/` | ADRs, runbooks, drill reports, security docs, gates readiness, deployment guide, performance baseline |
 | `chaos/` | Failure-drill scripts D1–D6 + timestamped evidence (WP2.7 execution) |
-| `scripts/` | Bootstrap, readiness, smoke test, certificate-expiry exporter |
+| `scripts/` | Bootstrap, readiness, smoke test, certificate-expiry exporter, diagnostics collection |
 | `.github/workflows/` | CI: build/tests, config lint, shell/Dockerfile lint, secret scan |
 
 ## Development
