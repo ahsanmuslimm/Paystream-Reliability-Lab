@@ -8,9 +8,13 @@ spring:
       properties:
         schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
         replication.factor: 3
-        # malformed records are logged and skipped; full DLQ routing arrives
-        # with WP2.3 (Stage 2)
-        default.deserialization.exception.handler: org.apache.kafka.streams.errors.LogAndContinueExceptionHandler
+        # WP2.3 (FR-07): poison records are published to the DLQ with the
+        # Document 03 header set; the thread continues so the consumer keeps
+        # running. Both handlers fall back to FAIL when the DLQ publish fails.
+        default.deserialization.exception.handler: com.paystream.frauddetector.streams.dlq.DlqDeserializationExceptionHandler
+        default.processing.exception.handler: com.paystream.frauddetector.streams.dlq.DlqProcessingExceptionHandler
+        dlq.topic: ${DLQ_TOPIC:bank.transactions.v1.dlq}
+        dlq.consumer.group: fraud-detector
         state.dir: /tmp/kafka-streams
         metrics.recording.level: INFO
 
@@ -30,6 +34,8 @@ management:
 paystream:
   fraud:
     amount-threshold: ${FRAUD_AMOUNT_THRESHOLD:10000}
+    velocity-limit: ${FRAUD_VELOCITY_LIMIT:5}
+    velocity-window-seconds: ${FRAUD_VELOCITY_WINDOW_SECONDS:60}
   schema-registry-url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
 
 logging:

@@ -1,9 +1,18 @@
 # PayStream Reliability Lab - one-command operations
 # Targets follow Document 04. Run from the repository root.
+#
+# Two stack modes:
+#   make up         plaintext MVP stack (core + monitoring)
+#   make up-secure  secured stack per WP2.1/WP2.2 (mTLS, SCRAM, ACLs) +
+#                   monitoring, the reference mode for Stage 2 drills
 
 SHELL := /bin/bash
 COMPOSE_FILES := -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.monitoring.yml
+COMPOSE_SECURE_FILES := $(COMPOSE_FILES) -f infra/compose/docker-compose.security.yml
+COMPOSE_CONNECT_FILES := -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.connect.yml
 ENV_FILE := --env-file .env
+ENV_FILE_SECURE := --env-file .env --env-file security/secrets/interpolation.env
+MVN := $(if $(wildcard /d/TOOLS/apache-maven/apache-maven-3.9.11/bin/mvn),/d/TOOLS/apache-maven/apache-maven-3.9.11/bin/mvn,mvn)
 
 .DEFAULT_GOAL := help
 
@@ -16,9 +25,13 @@ env: ## Create .env from .env.example if missing
 	@test -f .env || (cp .env.example .env && echo "Created .env from .env.example")
 
 .PHONY: up
-up: env build-images ## Start the full stack: 3 brokers, Schema Registry, Postgres, services, monitoring
+up: env build-images ## Start the plaintext MVP stack: 3 brokers, Schema Registry, Postgres, services, monitoring
 	docker compose $(ENV_FILE) $(COMPOSE_FILES) up -d
 	$(MAKE) --no-print-directory topics
+
+.PHONY: up-secure
+up-secure: env certs scram ## Start the secured stack: mTLS listeners, SCRAM auth, ACLs (WP2.1/WP2.2)
+	docker compose $(ENV_FILE_SECURE) $(COMPOSE_SECURE_FILES) up -d
 
 .PHONY: down
 down: ## Stop the stack (volumes are kept; use 'make nuke' to remove them)
@@ -38,26 +51,58 @@ logs: ## Tail logs from all services
 
 .PHONY: build
 build: ## Compile and unit-test the Java services (no Docker needed)
-	mvn -f services/pom.xml -B verify
+	$(MVN) -f services/pom.xml -B verify
 
 .PHONY: build-images
 build-images: ## Build the service container images
 	docker compose $(ENV_FILE) -f infra/compose/docker-compose.yml build
+
+.PHONY: certs
+certs: ## Generate lab PKI: CA, 3 broker certs, kafka-setup + demo client certs
+	bash security/scripts/gen-ca.sh
+	@for n in 1 2 3; do bash security/scripts/gen-broker-cert.sh --name broker-$$n; done
+	bash security/scripts/gen-client-cert.sh --name kafka-setup
+	bash security/scripts/gen-client-cert.sh --name svc-demo
+
+.PHONY: scram
+scram: ## Generate SCRAM-SHA-512 credentials (idempotent, git-ignored)
+	bash security/scripts/create-scram-users.sh --generate-only
+
+.PHONY: scram-apply
+scram-apply: ## Register SCRAM users on the running secured cluster (mTLS admin path)
+	bash security/scripts/create-scram-users.sh --apply
 
 .PHONY: topics
 topics: ## Apply kafka-config/topics.yaml to the running cluster
 	bash kafka-config/scripts/apply-topics.sh
 
 .PHONY: acls
-acls: ## Apply kafka-config/acls.yaml (requires security overlay, Stage 2)
-	@echo "ACL application requires the security overlay (WP2.2, Stage 2)."
+acls: ## Apply kafka-config/acls.yaml to the secured cluster (svc-admin-ci)
+	bash kafka-config/scripts/apply-acls.sh --bootstrap localhost:19091 --command-config security/secrets/admin.properties
 
-.PHONY: certs
-certs: ## Generate lab PKI certificates (Stage 2, WP2.1)
-	@echo "Certificate generation arrives with WP2.1 (Stage 2)."
+.PHONY: up-connect
+up-connect: ## Start Kafka Connect with the accounts CDC connector stack
+	docker compose $(ENV_FILE) $(COMPOSE_CONNECT_FILES) up -d connect
+
+.PHONY: apply-connector
+apply-connector: ## Register the Debezium accounts connector (POST to Connect REST)
+	bash kafka-config/scripts/apply-connector.sh
+
+.PHONY: replay-dlq
+replay-dlq: ## Build and run the DLQ replay tool (pass ARGS="--dlq bank.transactions.v1.dlq --dry-run")
+	$(MVN) -q -f services/pom.xml -pl dlq-replay package -DskipTests
+	java -jar services/dlq-replay/target/dlq-replay-0.1.0.jar --bootstrap localhost:19091 $(ARGS)
+
+.PHONY: cert-expiry-check
+cert-expiry-check: ## Probe listener certs and push expiry metrics to Pushgateway
+	bash scripts/cert-expiry-check.sh
+
+.PHONY: drift
+drift: ## Report drift between the live cluster and topics.yaml / acls.yaml
+	bash kafka-config/scripts/check-drift.sh
 
 .PHONY: validate-config
-validate-config: ## Lint topics/ACLs/schemas against the Document 03 standards
+validate-config: ## Lint topics/ACLs/schemas/connect/security/monitoring against the standards
 	python kafka-config/scripts/validate-config.py
 
 .PHONY: test

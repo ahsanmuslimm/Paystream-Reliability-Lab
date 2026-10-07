@@ -9,6 +9,8 @@ COMPOSE_FILE="infra/compose/docker-compose.yml"
 ENV_FILE=".env"
 BROKER="kafka-1"
 BOOTSTRAP="localhost:29092"
+COMMAND_CONFIG=""
+DIRECT=0
 
 usage() {
   cat <<'EOF'
@@ -19,17 +21,26 @@ be re-run safely; it never deletes topics not present in the YAML (use the
 drift check for that).
 
 Options:
-  -h, --help    Show this help.
-  --dry-run     Print the kafka-topics commands without executing them.
+  -h, --help            Show this help.
+  --dry-run             Print the kafka-topics commands without executing.
+  --bootstrap URL       Bootstrap server to use (default: localhost:29092).
+  --command-config FILE Client properties for authenticated clusters
+                        (SASL/SSL), e.g. the svc-admin-ci properties file.
+  --direct              Run kafka-topics.sh in the current environment
+                        instead of via docker compose (used inside the
+                        kafka-setup container by bootstrap-security.sh).
 EOF
 }
 
 DRY_RUN=0
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     -h|--help) usage; exit 0 ;;
-    --dry-run) DRY_RUN=1 ;;
-    *) echo "Unknown option: $arg" >&2; usage; exit 1 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --bootstrap) BOOTSTRAP="$2"; shift 2 ;;
+    --command-config) COMMAND_CONFIG="$2"; shift 2 ;;
+    --direct) DIRECT=1 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
 
@@ -98,12 +109,25 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
+# Build the auth suffix once; empty for the plaintext MVP path.
+AUTH_ARGS=""
+if [ -n "$COMMAND_CONFIG" ]; then
+  AUTH_ARGS="--command-config $COMMAND_CONFIG"
+fi
+
+run_kafka_cmd() {
+  if [ "$DIRECT" -eq 1 ]; then
+    $1
+  else
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T "$BROKER" $1
+  fi
+}
+
 echo "Applying topics to $BROKER ($BOOTSTRAP)..."
 echo "$CMDS" | while IFS= read -r cmd; do
   echo "  + ${cmd#kafka-topics.sh }"
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T "$BROKER" $cmd
+  run_kafka_cmd "$cmd $AUTH_ARGS"
 done
 
 echo "Current topics in cluster:"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T "$BROKER" \
-  kafka-topics.sh --bootstrap-server "$BOOTSTRAP" --list
+run_kafka_cmd "kafka-topics.sh --bootstrap-server $BOOTSTRAP --list"

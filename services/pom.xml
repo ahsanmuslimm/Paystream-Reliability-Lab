@@ -22,11 +22,13 @@
     <module>txn-producer</module>
     <module>fraud-detector</module>
     <module>notifier</module>
+    <module>dlq-replay</module>
   </modules>
 
   <properties>
     <java.version>21</java.version>
     <confluent.version>7.9.0</confluent.version>
+    <logstash-encoder.version>8.1</logstash-encoder.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
@@ -52,6 +54,12 @@
     <dependency>
       <groupId>io.micrometer</groupId>
       <artifactId>micrometer-registry-prometheus</artifactId>
+    </dependency>
+    <!-- structured single-line JSON logs for Loki (WP2.5) -->
+    <dependency>
+      <groupId>net.logstash.logback</groupId>
+      <artifactId>logstash-logback-encoder</artifactId>
+      <version>${logstash-encoder.version}</version>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>

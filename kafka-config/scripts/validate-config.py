@@ -27,10 +27,22 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 TOPIC_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*\.[a-z0-9._-]+\.v\d+(\.(retry|dlq))?$")
-ALLOWED_TOPIC_PREFIXES = ("pg.", "connect-")
-KNOWN_OPERATIONS = {"READ", "WRITE", "CREATE", "ALTER", "DELETE", "DESCRIBE", "ALL", "IDEMPOTENT_WRITE"}
+ALLOWED_TOPIC_PREFIXES = ("pg.", "connect-", "_schemas")
+KNOWN_OPERATIONS = {"READ", "WRITE", "CREATE", "ALTER", "DELETE", "DESCRIBE", "ALL",
+                    "IDEMPOTENT_WRITE", "DESCRIBE_CONFIGS", "ALTER_CONFIGS"}
 KNOWN_PATTERNS = {"literal", "prefixed"}
 KNOWN_RESOURCE_TYPES = {"topic", "group", "cluster", "transactional_id"}
+
+# FR-11: every Must-level failure mode needs a firing alert. These alert names
+# must exist across monitoring/prometheus/rules/*.yml.
+REQUIRED_ALERTS = {
+    "KafkaBrokerCountBelowExpected",
+    "KafkaClusterUnderReplicatedPartitions",
+    "KafkaPartitionIsrBelowMinIsr",
+    "ConsumerLagHigh",
+    "NodeDiskAlmostFull",
+    "CertExpiringSoon",
+}
 
 violations: list[str] = []
 
@@ -230,11 +242,84 @@ def check_broker_baselines() -> None:
             err(f"docker-compose.yml: broker baseline {key}: {expected} missing")
 
 
+def check_connector() -> None:
+    path = REPO_ROOT / "kafka-config" / "connect" / "accounts-cdc.json"
+    if not path.exists():
+        err("kafka-config/connect/accounts-cdc.json: not found (FR-15)")
+        return
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        err(f"connect/accounts-cdc.json: invalid JSON: {e}")
+        return
+    cfg = doc.get("config", {})
+    required = {
+        "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+        "topic.prefix": "pg",
+    }
+    for key, expected in required.items():
+        if cfg.get(key) != expected:
+            err(f"connect/accounts-cdc.json: {key} must be {expected!r}, got {cfg.get(key)!r}")
+    if "public.accounts" not in str(cfg.get("table.include.list", "")):
+        err("connect/accounts-cdc.json: table.include.list must cover public.accounts")
+    password = str(cfg.get("database.password", ""))
+    if "${env:" not in password and password:
+        err("connect/accounts-cdc.json: database.password must use the env config provider (${env:...}), never a literal")
+
+
+def check_security_overlay() -> None:
+    path = REPO_ROOT / "infra" / "compose" / "docker-compose.security.yml"
+    if not path.exists():
+        err("infra/compose/docker-compose.security.yml: not found (FR-08)")
+        return
+    text = path.read_text(encoding="utf-8")
+    required = [
+        "StandardAuthorizer",
+        "SASL_SSL",
+        "SCRAM-SHA-512",
+        'KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"',
+        "KAFKA_LISTENER_NAME_BROKER_SSL_CLIENT_AUTH: required",
+        "KAFKA_LISTENER_NAME_CONTROLLER_SSL_CLIENT_AUTH: required",
+    ]
+    for token in required:
+        if token not in text:
+            err(f"docker-compose.security.yml: missing {token}")
+
+
+def check_monitoring() -> None:
+    rules_dir = REPO_ROOT / "monitoring" / "prometheus" / "rules"
+    found_alerts: set[str] = set()
+    for f in sorted(rules_dir.glob("*.yml")):
+        found_alerts |= set(re.findall(r"^\s*- alert: (\w+)", f.read_text(encoding="utf-8"), re.M))
+    missing = REQUIRED_ALERTS - found_alerts
+    if missing:
+        err(f"monitoring/prometheus/rules: missing required alerts {sorted(missing)}")
+
+    for path in (
+        REPO_ROOT / "monitoring" / "alertmanager" / "alertmanager.yml",
+        REPO_ROOT / "monitoring" / "loki" / "loki-config.yml",
+        REPO_ROOT / "monitoring" / "promtail" / "promtail-config.yml",
+        REPO_ROOT / "monitoring" / "jmx" / "broker.yml",
+    ):
+        if not path.exists():
+            err(f"monitoring: {path.relative_to(REPO_ROOT)} not found (WP2.5)")
+
+    dashboards = REPO_ROOT / "monitoring" / "grafana" / "dashboards"
+    for f in sorted(dashboards.glob("*.json")):
+        try:
+            json.loads(f.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            err(f"grafana/dashboards/{f.name}: invalid JSON: {e}")
+
+
 def main() -> int:
     check_topics()
     check_acls()
     check_schemas()
     check_broker_baselines()
+    check_connector()
+    check_security_overlay()
+    check_monitoring()
     if violations:
         print(f"validate-config: {len(violations)} violation(s):")
         for v in violations:

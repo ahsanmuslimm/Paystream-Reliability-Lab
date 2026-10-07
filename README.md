@@ -68,20 +68,21 @@ One responsibility per directory (Document 04):
 
 | Directory | Purpose |
 |---|---|
-| `kafka-config/` | Topics, ACLs, Avro schemas as code + validation/apply scripts |
-| `services/` | Maven multi-module: `common-avro`, `txn-producer`, `fraud-detector`, `notifier` |
-| `infra/compose/` | Core stack + monitoring overlay (security/connect overlays arrive in Stage 2) |
-| `monitoring/` | Prometheus config + rules, Grafana provisioning + dashboards |
-| `docs/` | ADRs, runbooks, drill reports, deployment guide, performance baseline |
-| `chaos/` | Failure-drill scripts D1–D6 + timestamped evidence (Stage 2) |
-| `scripts/` | Bootstrap, readiness, smoke test |
+| `kafka-config/` | Topics, ACLs, Avro schemas, Debezium connector as code + validation/apply/drift scripts |
+| `services/` | Maven multi-module: `common-avro`, `txn-producer`, `fraud-detector`, `notifier`, `dlq-replay` |
+| `infra/compose/` | Core stack + monitoring, security (WP2.1/WP2.2) and connect (WP2.4) overlays |
+| `security/` | PKI and SCRAM credential scripts (`scripts/`), generated material git-ignored |
+| `monitoring/` | Prometheus rules, Alertmanager, Loki/Promtail, JMX exporter config, Grafana dashboards |
+| `docs/` | ADRs, runbooks, drill reports, security docs, deployment guide, performance baseline |
+| `chaos/` | Failure-drill scripts D1–D6 + timestamped evidence (WP2.7 execution) |
+| `scripts/` | Bootstrap, readiness, smoke test, certificate-expiry exporter |
 | `.github/workflows/` | CI: build/tests, config lint, shell/Dockerfile lint, secret scan |
 
 ## Development
 
 ```bash
-make build          # compile + full unit-test suite (no Docker needed)
-make validate-config# lint topics/ACLs/schemas against the Document 03 standards
+make build           # compile + full unit-test suite (no Docker needed)
+make validate-config # lint topics/ACLs/schemas/connect/security/monitoring
 ```
 
 - `common-avro` generates classes straight from `kafka-config/schemas/*.avsc` —
@@ -91,33 +92,40 @@ make validate-config# lint topics/ACLs/schemas against the Document 03 standards
 - Idempotency: `notifier` inserts a `processed_events` marker and the business
   rows in one transaction, then commits the Kafka offset (FR-06). Replaying an
   alert any number of times yields exactly one notification row.
+- Hardening (Stage 2): velocity window rule (TopologyTestDriver-verified),
+  DLQ with the Document 03 header set on both stream and consumer sides
+  (ADR-0006), and a `dlq-replay` operator tool with a dry-run mode.
 
 ## Lifecycle stage status
 
 | Stage | Scope | Status |
 |---|---|---|
 | 0 — Prototype | Environment baseline (P0) recorded in `.env.example` heaps | ✅ recorded 2026-10-06 |
-| 1 — MVP | This slice: cluster, 3 services, amount rule, minimal dashboards, CI | 🚧 in progress |
-| 2 — Final | mTLS/SCRAM/ACLs, velocity rule, DLQ, CDC, alerts, drills D1–D6, upgrade | ⬜ planned |
+| 1 — MVP | Cluster, 3 services, amount rule, minimal dashboards, CI | ✅ 2026-10-06 (22 tests) |
+| 2 — Final | Security, hardening, CDC, full observability, config-as-code authored 2026-10-07; drills D1–D6 execution + upgrade/perf evidence pending Docker | 🚧 authored, runtime-verification pending |
 | 3 — Commercial-ready | K8s, IaC, DR, SLOs (optional, time-boxed) | ⬜ planned |
 
 ## Known limitations
 
 Honest list, reviewed at every stage gate (G2 requires it):
 
-- Transport is plaintext inside the Compose network for now; TLS/mTLS,
-  SASL/SCRAM and default-deny ACLs are Stage 2 (WP2.1/WP2.2) and will be
-  enforced with scripted negative tests.
-- Only the amount-threshold fraud rule is implemented; the 60 s velocity rule
-  arrives with the Kafka Streams hardening package (WP2.3).
-- Poison records are logged-and-skipped; the DLQ envelope and replay tooling
-  are Stage 2 (WP2.3).
-- No Kafka Connect / Debezium CDC yet (Stage 2, WP2.4) — `pg.public.accounts`
-  and Connect internal topics are pre-created but unused.
+- **Docker is not installed on the reference workstation** (deliberate
+  uninstall). Everything above is authored and unit/config-verified
+  container-free; cluster-runtime verification — `make up-secure`, the six
+  drills executed twice with evidence, upgrade/expansion runs, and the
+  performance/soak baseline — is the next step once Docker Desktop is back.
+- Security overlay (`make up-secure`) is written per ADR-0002 but its
+  runtime handshake behaviour (mTLS controllers, exporter SASL flags) is
+  not yet exercised; expect one calibration pass with Docker available.
+- JMX broker metrics ship as config (`monitoring/jmx/broker.yml`) but the
+  broker javaagent wiring is documented, not enabled — the related alerts
+  activate once wired.
+- Alertmanager's lab receiver intentionally has no external integrations;
+  the UI/API is the evidence surface for drill screenshots.
+- Schema Registry HTTP endpoint is unauthenticated inside the Compose
+  network (lab-only); Kafka listeners are fully secured in `up-secure` mode.
 - Non-functional targets (p99 < 200 ms at 1,000 msg/s; ≥ 5,000 msg/s ceiling)
   are design targets until measured into `docs/performance/baseline.md`.
-- JMX broker metrics, Alertmanager routing and Loki are Stage 2 (WP2.5); the
-  MVP dashboard covers broker count, URP, lag and service metrics.
 
 ## License
 

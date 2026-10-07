@@ -1,0 +1,27 @@
+# PayStream Reliability Lab - Alertmanager routing (WP2.5)
+# The lab receiver "lab" has no external integrations: alerts are visible in
+# the Alertmanager UI (http://localhost:9093) and API, which is the evidence
+# surface for drill screenshots (FR-11, D1-D6). Production-style deployments
+# wire Slack/e-mail by replacing the receiver, e.g.:
+#   receivers:
+#     - name: lab
+#       slack_configs:
+#         - api_url: <secret>      # from deployment secrets, never committed
+#           channel: "#paystream-alerts"
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: lab
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: lab
+      matchers:
+        - severity = "critical"
+      repeat_interval: 1h
+
+receivers:
+  - name: lab

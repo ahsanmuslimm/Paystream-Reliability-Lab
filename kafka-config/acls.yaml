@@ -62,6 +62,18 @@ acls:
       type: topic
       name: bank.notifications.v1
     operations: [WRITE, DESCRIBE]
+  # ADR-0006 addition: notifier poison path mirrors the transactions domain
+  # (Document 03 lists .retry/.dlq only for the transactions domain)
+  - principal: User:svc-notify
+    resource:
+      type: topic
+      name: bank.fraud-alerts.v1.retry
+    operations: [READ, WRITE, DESCRIBE]
+  - principal: User:svc-notify
+    resource:
+      type: topic
+      name: bank.fraud-alerts.v1.dlq
+    operations: [READ, WRITE, DESCRIBE]
 
   - principal: User:svc-connect
     resource:
@@ -75,6 +87,62 @@ acls:
       name: connect-
       pattern: prefixed
     operations: [READ, WRITE, CREATE, DESCRIBE]
+  # ADR-0006 addition: Connect's worker consumer group (internal topics are
+  # already declared in topics.yaml as connect-*)
+  - principal: User:svc-connect
+    resource:
+      type: group
+      name: connect-cluster
+    operations: [READ]
+
+  # ADR-0006 addition: Schema Registry authenticates with SCRAM on the
+  # secured cluster and manages the compacted _schemas topic itself
+  - principal: User:svc-schema-registry
+    resource:
+      type: topic
+      name: _schemas
+    operations: [READ, WRITE, CREATE, DESCRIBE, DESCRIBE_CONFIGS, ALTER_CONFIGS]
+  - principal: User:svc-schema-registry
+    resource:
+      type: cluster
+      name: kafka-cluster
+    operations: [DESCRIBE]
+
+  # ADR-0006 addition: kafka-exporter principal for FR-10/FR-11 metrics.
+  # Prefixed grants avoid wildcard resources while covering all domains.
+  - principal: User:svc-monitor
+    resource:
+      type: cluster
+      name: kafka-cluster
+    operations: [DESCRIBE, DESCRIBE_CONFIGS]
+  - principal: User:svc-monitor
+    resource:
+      type: topic
+      name: bank.
+      pattern: prefixed
+    operations: [DESCRIBE]
+  - principal: User:svc-monitor
+    resource:
+      type: topic
+      name: pg.
+      pattern: prefixed
+    operations: [DESCRIBE]
+  - principal: User:svc-monitor
+    resource:
+      type: topic
+      name: connect-
+      pattern: prefixed
+    operations: [DESCRIBE]
+  - principal: User:svc-monitor
+    resource:
+      type: group
+      name: fraud-detector
+    operations: [READ]
+  - principal: User:svc-monitor
+    resource:
+      type: group
+      name: notifier
+    operations: [READ]
 
   - principal: User:svc-admin-ci
     resource:
