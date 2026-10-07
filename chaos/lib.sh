@@ -70,3 +70,63 @@ require_cluster() {
     exit 1
   fi
 }
+
+# ---- mode-aware Kafka CLI helpers --------------------------------------------
+# The drills must run against both stack modes: plaintext (make up) and the
+# secured overlay (make up-secure). In secured mode, admin commands inside
+# kafka-1 authenticate as the broker's own certificate via the BROKER mTLS
+# listener; in plaintext mode they use the classic listener.
+
+stack_mode() {
+  if compose exec -T kafka-1 test -f /etc/kafka/secrets/command.properties 2>/dev/null; then
+    echo "secure"
+  else
+    echo "plaintext"
+  fi
+}
+
+bootstrap_args() {
+  case "$(stack_mode)" in
+    secure) echo "--bootstrap-server localhost:29094 --command-config /etc/kafka/secrets/command.properties" ;;
+    *) echo "--bootstrap-server localhost:29092" ;;
+  esac
+}
+
+kafka_exec() {
+  # kafka_exec kafka-topics.sh --describe ...  (bootstrap args added automatically
+  # when the command does not carry its own --bootstrap-server)
+  local cmd="$1"; shift
+  local args=()
+  local has_bootstrap=0
+  for a in "$@"; do
+    [ "$a" = "--bootstrap-server" ] && has_bootstrap=1
+    args+=("$a")
+  done
+  if [ "$has_bootstrap" -eq 0 ]; then
+    # shellcheck disable=SC2312  # intentional: bootstrap_args is mode detection
+    mapfile -t bootargs < <(bootstrap_args | tr ' ' '\n')
+    compose exec -T "$DRILL_BROKER" "$cmd" "${bootargs[@]}" "${args[@]}"
+  else
+    compose exec -T "$DRILL_BROKER" "$cmd" "${args[@]}"
+  fi
+}
+
+DRILL_BROKER="${DRILL_BROKER:-kafka-1}"
+
+# Run under representative load: ensures the txn generator is producing at the
+# requested rate (1-5000). Passes through both stack modes (HTTP is local).
+start_load() {
+  local rate="${1:-${DRILL_RATE:-100}}"
+  curl -fsS -X POST "http://localhost:${TXN_PRODUCER_HOST_PORT:-8080}/api/generation/start?rate=${rate}" >/dev/null 2>&1 \
+    || echo "WARN: could not set generator rate via API (is txn-producer up?)" >&2
+}
+
+stop_load() {
+  curl -fsS -X POST "http://localhost:${TXN_PRODUCER_HOST_PORT:-8080}/api/generation/stop" >/dev/null 2>&1 || true
+}
+
+# Producer error sentinel: the generator's own counters must never regress and
+# produce errors must stay 0 (T12 semantics, also used by D1/D2 acceptance).
+generator_status() {
+  curl -fsS "http://localhost:${TXN_PRODUCER_HOST_PORT:-8080}/api/generation/status" 2>/dev/null || echo "{}"
+}
