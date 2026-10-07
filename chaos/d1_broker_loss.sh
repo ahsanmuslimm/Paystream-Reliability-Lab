@@ -53,7 +53,6 @@ wait_for_healthy
 start_load "$RATE"
 drill_capture "baseline"
 
-BROKERS_UP_BEFORE="$(kafka_exec kafka-broker-api-versions.sh --bootstrap-server localhost:29092 2>/dev/null | grep -c 'localhost\|kafka-' || true)"
 echo "[D1] stopping ${TARGET_BROKER} at $(date -u +%H:%M:%S)..."
 compose stop "$TARGET_BROKER" >/dev/null 2>&1
 drill_capture "broker-down"

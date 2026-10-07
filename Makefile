@@ -101,6 +101,14 @@ cert-expiry-check: ## Probe listener certs and push expiry metrics to Pushgatewa
 drift: ## Report drift between the live cluster and topics.yaml / acls.yaml
 	bash kafka-config/scripts/check-drift.sh
 
+.PHONY: t8-security
+t8-security: ## T8 negative tests against the secured stack (plaintext/SCRAM/certs/ACLs)
+	bash tests/security/t8-security-tests.sh
+
+.PHONY: contract
+contract: ## T7 schema-evolution contract tests against Schema Registry
+	bash tests/contract/schema-evolution.sh
+
 .PHONY: validate-config
 validate-config: ## Lint topics/ACLs/schemas/connect/security/monitoring against the standards
 	python kafka-config/scripts/validate-config.py

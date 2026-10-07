@@ -43,8 +43,8 @@ drill_init "D3" "rebalance storms grow lag but cooperative assignment bounds the
 RESTORED=0
 restore() {
   if [ "$RESTORED" -eq 0 ]; then
-    echo "[D3] restoring notifier to a single replica..."
-    compose up -d --no-deps --scale notifier=1 notifier >/dev/null 2>&1 || true
+    echo "[D3] ensuring no rogue consumer is left running..."
+    [ -n "${ROGUE_PID:-}" ] && kill "$ROGUE_PID" >/dev/null 2>&1 || true
     RESTORED=1
   fi
 }
@@ -55,16 +55,27 @@ wait_for_healthy
 start_load "$RATE"
 drill_capture "baseline"
 
+# Member churn without compose scaling (services have fixed container names):
+# a rogue console consumer repeatedly joins and leaves the 'notifier' group,
+# forcing the real members through cooperative rebalances under load.
+# Auto-commit is disabled so the rogue never advances the group's offsets -
+# alerts it briefly owns are redelivered to the real notifier after it leaves.
 for i in $(seq 1 "$CYCLES"); do
-  echo "[D3] cycle ${i}/${CYCLES}: scaling notifier to 2..."
-  compose up -d --no-deps --scale notifier=2 notifier >/dev/null 2>&1
+  echo "[D3] cycle ${i}/${CYCLES}: rogue member joins the notifier group..."
+  # bootstrap args are appended by kafka_exec (mode-aware: 29092 plaintext /
+  # 29094 + command-config on the secured stack)
+  kafka_exec kafka-console-consumer.sh \
+    --group notifier --topic bank.fraud-alerts.v1 --timeout-ms 20000 \
+    --consumer-property enable.auto.commit=false \
+    >/dev/null 2>&1 &
+  ROGUE_PID=$!
   sleep 20
   drill_capture "cycle${i}-joined"
 
-  echo "[D3] cycle ${i}/${CYCLES}: killing the second member..."
-  SECOND="$(docker ps --filter "name=paystream-notifier-2" --filter "name=notifier-2" -q | head -1)"
-  [ -n "$SECOND" ] && docker stop "$SECOND" >/dev/null 2>&1
-  compose up -d --no-deps --scale notifier=1 notifier >/dev/null 2>&1
+  echo "[D3] cycle ${i}/${CYCLES}: rogue member leaves (kill)..."
+  kill "$ROGUE_PID" >/dev/null 2>&1 || true
+  wait "$ROGUE_PID" 2>/dev/null || true
+  ROGUE_PID=""
   sleep 20
   drill_capture "cycle${i}-killed"
 done

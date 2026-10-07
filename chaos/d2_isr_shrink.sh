@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
 done
 
 require_cluster
-drill_init "D2" "two brokers down: producers block by design (min ISR 2), consumers on remaining leaders continue, ordered recovery restores full ISR"
+drill_init "D2" "two brokers down: metadata quorum loses its majority, acks=all producers block by design (min ISR 2), consumers on remaining leaders continue, ordered recovery restores full ISR"
 RESTORED=0
 restore() {
   if [ "$RESTORED" -eq 0 ]; then
@@ -49,13 +49,14 @@ wait_for_healthy
 start_load "${DRILL_RATE:-100}"
 drill_capture "baseline"
 
-echo "[D2] stopping kafka-2 and kafka-3 (quorum survives on kafka-1)..."
+echo "[D2] stopping kafka-2 and kafka-3 (metadata quorum loses its majority; kafka-1 keeps serving the partitions it leads)..."
 compose stop kafka-2 >/dev/null 2>&1
 compose stop kafka-3 >/dev/null 2>&1
 drill_capture "two-down"
 sleep "$DURATION"
 
 # producer outage evidence: generator counters stall while acks=all blocks
+# (min.insync.replicas=2 is no longer satisfiable)
 STATUS_DURING="$(generator_status)"
 echo "[D2] generator status during outage: ${STATUS_DURING}"
 

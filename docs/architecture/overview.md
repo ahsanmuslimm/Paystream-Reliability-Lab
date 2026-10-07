@@ -12,15 +12,18 @@ txn-producer ─────────► bank.transactions.v1 (6 partitions, 
   keyed by account_id)     ▼
                       fraud-detector (Kafka Streams, app id: fraud-detector)
                        · amount rule: amount > threshold → FraudAlert
-                       · per-account count store (velocity anchor, Stage 2)
-                          │
-                          ▼
+                       · velocity rule: N txns per account in a 60 s
+                         window → one VELOCITY_WINDOW alert per burst
+                          │   poison records → bank.transactions.v1.dlq
+                          ▼   (Document 03 header set, ADR-0006)
                       bank.fraud-alerts.v1 (3 partitions)
                           │
                           ▼
                       notifier (idempotent consumer, group: notifier)
                        · processed_events marker + business rows in ONE tx
                        · Kafka offset committed after the DB commit
+                       · poison alerts → bank.fraud-alerts.v1.dlq;
+                         replay via services/dlq-replay (dlq-replay.md)
                           │
                           ├─► PostgreSQL: accounts, processed_events,
                           │   fraud_alerts, notifications, ops tables
@@ -63,6 +66,8 @@ default behaviour).
 | [0002](0002-listener-security-layout.md) | listener layout pre-wired for mTLS/SCRAM |
 | [0003](0003-topic-partitions-keying.md) | 6 partitions, keyed by account_id |
 | [0004](0004-schema-compatibility.md) | Avro BACKWARD, TopicNameStrategy, schemas as code |
+| [0005](0005-cooperative-rebalancing.md) | CooperativeStickyAssignor everywhere (D3 support) |
+| [0006](0006-dlq-envelope-replay.md) | DLQ envelope (Document 03 headers), retry semantics, replay tool |
 
 ## Positioning
 
