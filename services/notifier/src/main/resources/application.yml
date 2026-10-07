@@ -22,9 +22,14 @@ spring:
       # Document 03 section 5.3 consumer baselines
       enable-auto-commit: false
       auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      # ErrorHandlingDeserializer carries the raw failed payload to the DLQ
+      # recoverer (kafka-clients 3.9 / KIP-899: the consumer itself cannot
+      # return the record, ADR-0006)
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: io.confluent.kafka.serializers.KafkaAvroDeserializer
         schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
         specific.avro.reader: true
         session.timeout.ms: 45000

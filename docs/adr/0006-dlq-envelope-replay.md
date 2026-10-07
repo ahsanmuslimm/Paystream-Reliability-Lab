@@ -32,14 +32,20 @@ value as the original raw bytes plus a defined record-header set:
    keeps running. If the DLQ publish itself fails they return FAIL - a
    record we could not even dead-letter must not be silently dropped.
 
-3. **Consumer side (notifier).** `DefaultErrorHandler` classifies
+3. **Consumer side (notifier).** The value (and key) deserializers are wrapped
+   in Spring's `ErrorHandlingDeserializer` - with kafka-clients 3.9 (KIP-899)
+   the consumer cannot hand a failed record to the error handler itself, so
+   the wrapper carries the raw failed bytes to the recoverer on the
+   `DeserializationException`. `DefaultErrorHandler` classifies
    deserialization failures as non-retryable (poison is never fixed by
    retrying) and recovers them to `bank.fraud-alerts.v1.dlq` immediately.
    Other exceptions get two backoff retries (1 s apart); after the retries
    are exhausted a record that has no raw payload (it was already
    deserialized) is logged at ERROR and skipped rather than dead-lettered -
    dead-lettering it would violate the raw-bytes envelope. The lag and
-   error alerts cover that path.
+   error alerts cover that path. Verified by the EmbeddedKafka wiring test
+   `NotifierDlqWiringTest` (container-free T6 precursor); the D6 drill
+   re-proves it end to end on the cluster.
 
 4. **Retry topics.** `bank.transactions.v1.retry` and
    `bank.fraud-alerts.v1.retry` are declared topics that serve as the

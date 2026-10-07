@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.kafka.support.serializer.DeserializationException;
 
 /**
  * Dead-letter recoverer for the notifier consumer (WP2.3, FR-07).
@@ -59,7 +60,8 @@ public class DlqRecoverer implements ConsumerRecordRecoverer {
 
     @Override
     public void accept(ConsumerRecord<?, ?> record, Exception exception) {
-        if (!(record.value() instanceof byte[] rawValue)) {
+        byte[] rawValue = resolveRawValue(record, exception);
+        if (rawValue == null) {
             log.error("Record {}:{}@{} failed after all retries but has no raw payload to "
                             + "dead-letter (error: {}). Skipping; the failure alert covers this path.",
                     record.topic(), record.partition(), record.offset(), exception.toString());
@@ -69,11 +71,12 @@ public class DlqRecoverer implements ConsumerRecordRecoverer {
         ProducerRecord<String, byte[]> dlqRecord =
                 new ProducerRecord<>(dlqTopic, null, record.key() instanceof String key ? key : null, rawValue);
         Headers headers = dlqRecord.headers();
+        Exception specific = mostSpecific(exception);
         headers.add(HEADER_ORIGINAL_TOPIC, bytes(record.topic()));
         headers.add(HEADER_ORIGINAL_PARTITION, bytes(String.valueOf(record.partition())));
         headers.add(HEADER_ORIGINAL_OFFSET, bytes(String.valueOf(record.offset())));
-        headers.add(HEADER_ERROR_CLASS, bytes(exception.getClass().getName()));
-        headers.add(HEADER_ERROR_MESSAGE, bytes(truncate(exception.getMessage())));
+        headers.add(HEADER_ERROR_CLASS, bytes(specific.getClass().getName()));
+        headers.add(HEADER_ERROR_MESSAGE, bytes(truncate(specific.getMessage())));
         headers.add(HEADER_FAILED_AT, bytes(ISO_UTC.format(Instant.now())));
         headers.add(HEADER_CONSUMER_GROUP, bytes(consumerGroup));
         headers.add(HEADER_ATTEMPTS, bytes(String.valueOf(deliveryAttempts(record))));
@@ -81,6 +84,48 @@ public class DlqRecoverer implements ConsumerRecordRecoverer {
         template.send(dlqRecord);
         log.warn("Record {}:{}@{} moved to {} ({})",
                 record.topic(), record.partition(), record.offset(), dlqTopic, exception.toString());
+    }
+
+    /**
+     * Raw bytes come from either the record itself (container-level byte[]
+     * payloads) or from the {@link DeserializationException} the
+     * {@code ErrorHandlingDeserializer} attached (KIP-899 path: the consumer
+     * cannot return the failed record, so the deserializer carries the raw
+     * data on the exception). The exception can arrive wrapped (e.g. in a
+     * ListenerExecutionFailedException), so the cause chain is searched.
+     */
+    private byte[] resolveRawValue(ConsumerRecord<?, ?> record, Exception exception) {
+        if (record.value() instanceof byte[] bytes) {
+            return bytes;
+        }
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof DeserializationException deser && deser.getData() instanceof byte[] data) {
+                return data;
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        return null;
+    }
+
+    /**
+     * The header should tell the operator what actually failed: the
+     * DeserializationException when the chain carries one, otherwise the
+     * deepest cause - never the framework wrapper.
+     */
+    private Exception mostSpecific(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof DeserializationException) {
+                return (Exception) current;
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        Throwable deepest = exception;
+        while (deepest.getCause() != null && deepest.getCause() != deepest) {
+            deepest = deepest.getCause();
+        }
+        return deepest instanceof Exception e ? e : new IllegalStateException(deepest);
     }
 
     private int deliveryAttempts(ConsumerRecord<?, ?> record) {
