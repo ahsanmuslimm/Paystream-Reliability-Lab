@@ -1,0 +1,22 @@
+# PayStream Reliability Lab - JMX exporter configuration for Kafka brokers
+# (WP2.5 deliverable). Activation requires the javaagent wiring documented in
+# docs/operations/deployment-guide.md (broker containers get the exporter jar
+# mounted and KAFKA_EXTRA_ARGS extended with -javaagent). Once enabled, add
+# the kafka-broker-jmx scrape job in prometheus.yml (kept commented there).
+#
+# Exposes the broker metrics the alert rules reference:
+#   kafka.server:type=KafkaController,name=OfflinePartitionsCount
+#   kafka.server:type=KafkaController,name=ActiveControllerCount
+# plus request latency percentiles used in the dashboards.
+startDelaySeconds: 30
+lowercaseOutputName: true
+rules:
+  - pattern: 'kafka.controller<type=(KafkaController), name=(OfflinePartitionsCount|ActiveControllerCount)><>(Value)'
+    name: kafka_server_kafkacontroller_$2
+    type: GAUGE
+  - pattern: 'kafka.network<type=(RequestMetrics), name=(TotalTimeMs), request=(\w+)><>(Mean|P99)'
+    name: kafka_server_request_total_time_ms_$3_$4
+    type: GAUGE
+  - pattern: 'kafka.server<type=(BrokerTopicMetrics), name=(MessagesInPerSec|BytesInPerSec|FailedProduceRequestsPerSec)><>(Count)'
+    name: kafka_server_brokertopicmetrics_$2
+    type: GAUGE

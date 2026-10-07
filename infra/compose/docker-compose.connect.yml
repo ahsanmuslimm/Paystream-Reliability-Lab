@@ -1,0 +1,50 @@
+# PayStream Reliability Lab - Kafka Connect overlay (profile: connect, WP2.4)
+# Debezium PostgreSQL source connector for the accounts table (FR-15).
+# The worker runs in plaintext mode against the MVP stack by default
+# (make up-connect). For the secured cluster, export CONNECT_BOOTSTRAP,
+# CONNECT_SECURITY_PROTOCOL, CONNECT_SASL_MECHANISM and CONNECT_SASL_JAAS
+# (see docs/operations/deployment-guide.md, section "Secure CDC").
+#
+# The connector config lives in kafka-config/connect/accounts-cdc.json and is
+# applied by kafka-config/scripts/apply-connector.sh. The database password is
+# injected through the env config provider - never committed to the JSON.
+
+services:
+  connect:
+    image: ${CONNECT_IMAGE:-confluentinc/cp-kafka-connect:7.9.0}
+    container_name: connect
+    restart: unless-stopped
+    depends_on:
+      schema-registry:
+        condition: service_healthy
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: ${CONNECT_BOOTSTRAP:-kafka-1:29092,kafka-2:29092,kafka-3:29092}
+      CONNECT_GROUP_ID: connect-cluster
+      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_CONFIG_PROVIDERS: env
+      CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+      CONNECT_REST_PORT: 8083
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_SECURITY_PROTOCOL: ${CONNECT_SECURITY_PROTOCOL:-PLAINTEXT}
+      CONNECT_SASL_MECHANISM: ${CONNECT_SASL_MECHANISM:-}
+      CONNECT_SASL_JAAS_CONFIG: ${CONNECT_SASL_JAAS_CONFIG:-}
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+      KAFKA_JVM_PERFORMANCE_OPTS: -Xms256m -Xmx512m
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-paystream}
+    ports:
+      - "${CONNECT_HOST_PORT:-18083}:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8083/connectors >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s

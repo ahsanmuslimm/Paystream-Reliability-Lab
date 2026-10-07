@@ -57,6 +57,14 @@ validate-config.py; the Stage 2 security overlay adds
 `session.timeout.ms=45000`, `max.poll.interval.ms=300000`,
 `partition.assignment.strategy=CooperativeStickyAssignor`.
 
+## Security additions (Stage 2, ADR-0006)
+
+The notifier DLQ/retry topics, `_schemas`, the `svc-monitor` read-only
+metrics principal and the `connect-cluster` group are ADR-0006 additions to
+the Document 03 matrix - recorded there under change control, mirrored in
+`kafka-config/`, and enforced by validate-config. No wildcard principals
+were introduced.
+
 ## Change process
 
 1. Edit the YAML/avsc file (never change a running system directly).

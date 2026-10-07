@@ -26,3 +26,9 @@ jobs:
 
       - name: Report topic catalogue
         run: bash kafka-config/scripts/apply-topics.sh --dry-run
+
+      - name: Report ACL commands
+        run: bash kafka-config/scripts/apply-acls.sh --dry-run
+
+      - name: Validate connector config
+        run: bash kafka-config/scripts/apply-connector.sh --dry-run

@@ -16,6 +16,7 @@ import java.util.UUID;
 public final class FraudRules {
 
     public static final String AMOUNT_RULE = "AMOUNT_THRESHOLD";
+    public static final String VELOCITY_RULE = "VELOCITY_WINDOW";
 
     private FraudRules() {
     }

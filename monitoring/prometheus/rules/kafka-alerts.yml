@@ -1,0 +1,124 @@
+# PayStream Reliability Lab - full alert rules (WP2.5, FR-11)
+# Every Must-level failure mode has a metric and a firing alert; each drill
+# (D1-D6) verifies its linked alert fires within its target time.
+#
+# Coverage map:
+#   broker loss (D1)        -> KafkaBrokerCountBelowExpected, KafkaExporterTargetDown
+#   ISR shrink / quorum (D2)-> KafkaPartitionIsrBelowMinIsr, KafkaOfflinePartitions, NoActiveController
+#   consumer lag (D3)       -> ConsumerLagHigh, NotifierRecordsLag
+#   disk exhaustion (D4)    -> NodeDiskAlmostFull
+#   certificate expiry (D5) -> CertExpiringSoon, CertExpired
+#   poison messages (D6)    -> DlqRecordPresent (via pushed DLQ depth or lag on .dlq)
+groups:
+  - name: kafka-cluster
+    rules:
+      - alert: KafkaExporterTargetDown
+        expr: up{job="kafka-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "kafka-exporter cannot reach the cluster"
+          description: "Prometheus cannot scrape kafka-exporter - check broker availability."
+
+      - alert: KafkaBrokerCountBelowExpected
+        expr: kafka_brokers < 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka cluster has fewer than 3 brokers"
+          description: "Broker count is {{ $value }}; expected 3 (D1/D2)."
+
+      - alert: KafkaPartitionIsrBelowMinIsr
+        expr: kafka_topic_partition_in_sync_replica < 2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A partition is below min.insync.replicas (2)"
+          description: "{{ $labels.topic }} [{{ $labels.partition }}] ISR is {{ $value }} - acks=all producers will start failing (D2)."
+
+      - alert: KafkaOfflinePartitions
+        expr: sum(kafka_server_kafkacontroller_offlinepartitionscount) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Offline partitions detected"
+          description: "{{ $value }} partition(s) have no active leader (requires broker JMX exporter wiring)."
+
+      - alert: NoActiveController
+        expr: max(kafka_server_kafkacontroller_activecontrollercount) != 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "KRaft controller state unexpected"
+          description: "Active controller count is {{ $value }}; exactly one is expected (requires broker JMX exporter wiring)."
+
+  - name: kafka-consumers
+    rules:
+      - alert: ConsumerLagHigh
+        expr: sum by (consumergroup) (kafka_consumergroup_lag) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer group {{ $labels.consumergroup }} lag above 1000"
+          description: "Total lag is {{ $value }} for 5m - consumers are falling behind (D3)."
+
+      - alert: NotifierRecordsLag
+        expr: kafka_consumer_fetch_manager_records_lag{job="notifier"} > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "notifier records-lag above 500"
+          description: "Micrometer consumer lag is {{ $value }} - check notifier throughput."
+
+  - name: host-resources
+    rules:
+      - alert: NodeDiskAlmostFull
+        expr: |
+          (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|shm|squashfs"}
+            / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay|shm|squashfs"}) > 0.70
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Docker host disk usage above 70%"
+          description: "Disk is {{ $value | humanizePercentage }} full - broker log volumes share this host (D4)."
+
+  - name: certificates
+    rules:
+      - alert: CertExpiringSoon
+        expr: paystream_cert_expiry_seconds < 1209600
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS certificate for {{ $labels.instance }} expires in under 14 days"
+          description: "{{ $value | humanizeDuration }} of validity left - run rotate-certs.sh (D5)."
+
+      - alert: CertExpired
+        expr: paystream_cert_expiry_seconds < 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "TLS certificate for {{ $labels.instance }} has expired"
+          description: "Handshakes are failing - rotate immediately with rotate-certs.sh (D5)."
+
+  - name: data-integrity
+    rules:
+      - alert: DlqBacklog
+        expr: |
+          sum by (topic) (
+            kafka_topic_partition_current_offset{topic=~".+\\.dlq"}
+              - on(topic, partition) kafka_topic_partition_oldest_offset{topic=~".+\\.dlq"}
+          ) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DLQ {{ $labels.topic }} holds unreplayed records"
+          description: "Poison records are waiting - follow docs/runbooks/dlq-replay.md (D6)."

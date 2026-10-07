@@ -1,0 +1,122 @@
+{
+  "editable": true,
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "displayMode": "list", "showLegend": true } },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{area=\"heap\"}",
+          "legendFormat": "{{job}} {{id}}"
+        }
+      ],
+      "title": "JVM heap used by service",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "percent" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "list", "showLegend": true } },
+      "targets": [
+        {
+          "expr": "process_cpu_usage{job=~\"txn-producer|fraud-detector|notifier\"} * 100",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "title": "Service CPU usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "list", "showLegend": true } },
+      "targets": [
+        {
+          "expr": "rate(http_server_requests_seconds_count{job=~\"txn-producer|fraud-detector|notifier\"}[1m])",
+          "legendFormat": "{{job}} {{uri}} {{status}}"
+        }
+      ],
+      "title": "HTTP request rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "list", "showLegend": true } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, job) (rate(http_server_requests_seconds_bucket{job=~\"txn-producer|fraud-detector|notifier\"}[5m])))",
+          "legendFormat": "p99 {{job}}"
+        }
+      ],
+      "title": "HTTP p99 latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Loki",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "id": 5,
+      "options": {
+        "sortOrder": "Descending",
+        "showTime": true,
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{service=~\"txn-producer|fraud-detector|notifier\"} | json | level=~\"ERROR|WARN\"",
+          "queryType": "range"
+        }
+      ],
+      "title": "Service errors and warnings (Loki)",
+      "type": "logs"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "list", "showLegend": true } },
+      "targets": [
+        {
+          "expr": "sum by (alertname) (ALERTS{alertstate=\"firing\"})",
+          "legendFormat": "{{alertname}}"
+        }
+      ],
+      "title": "Firing alerts",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "PayStream - Services & JVM",
+  "uid": "paystream-services-jvm"
+}

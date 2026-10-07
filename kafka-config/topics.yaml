@@ -45,6 +45,31 @@ topics:
       retention.ms: "1209600000"       # 14 days, delete
       cleanup.policy: delete
 
+  - name: bank.fraud-alerts.v1.retry
+    partitions: 3
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      retention.ms: "86400000"         # 1 day, delete
+      cleanup.policy: delete
+
+  - name: bank.fraud-alerts.v1.dlq
+    partitions: 3
+    replication-factor: 3
+    config:
+      min.insync.replicas: "2"
+      retention.ms: "1209600000"       # 14 days, delete
+      cleanup.policy: delete
+
+  # Schema Registry internal store (ADR-0006 addition: SR authenticates as
+  # User:svc-schema-registry on the secured cluster and needs its topic as code
+  # because broker auto-creation is disabled).
+  - name: _schemas
+    partitions: 1
+    replication-factor: 3
+    config:
+      cleanup.policy: compact
+
   - name: pg.public.accounts
     partitions: 3
     replication-factor: 3

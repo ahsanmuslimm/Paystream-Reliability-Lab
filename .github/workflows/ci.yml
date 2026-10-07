@@ -61,7 +61,7 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck scripts/*.sh kafka-config/scripts/*.sh
+          shellcheck scripts/*.sh kafka-config/scripts/*.sh security/scripts/*.sh chaos/*.sh
 
       - name: hadolint
         run: |

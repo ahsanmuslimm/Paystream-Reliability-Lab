@@ -7,32 +7,36 @@ import com.paystream.common.Topics;
 import java.math.BigDecimal;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Produced;
-import org.apache.kafka.streams.kstream.Materialized;
-import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.Topology;
 
 /**
- * Stream topology for the fraud detector.
+ * Stream topology for the fraud detector (Stage 2, WP2.3).
  *
- * MVP: amount threshold rule only (Stage 1 scope). The velocity window rule
- * and the retry/DLQ routing arrive in Stage 2 (WP2.3) - the store declared
- * below is the anchor the velocity window will use.
+ * Two rules over the same keyed transaction stream:
+ * - amount threshold: strictly above the configured limit, HIGH severity
+ *   beyond twice the limit, MEDIUM otherwise (Stage 1 scope);
+ * - velocity window: {@code velocityLimit} transactions per account inside a
+ *   trailing {@code velocityWindowSeconds} window (event time), firing once
+ *   per burst (FR-05).
+ *
+ * Deserialization and processing failures are routed to the DLQ by the
+ * handlers configured in application.yml (FR-07) - malformed records never
+ * reach the rules.
  */
 public final class FraudTopology {
-
-    public static final String ACCOUNT_TXN_COUNT_STORE = "account-txn-count";
 
     private FraudTopology() {
     }
 
-    public static Topology amountRuleTopology(StreamsBuilder builder,
-                                              BigDecimal threshold,
-                                              String schemaRegistryUrl) {
+    public static Topology fraudTopology(StreamsBuilder builder,
+                                         BigDecimal amountThreshold,
+                                         int velocityLimit,
+                                         long velocityWindowSeconds,
+                                         String schemaRegistryUrl) {
         Serde<String> keySerde = Serdes.String();
         Serde<Transaction> txnSerde = AvroSerdes.transaction(schemaRegistryUrl);
         Serde<FraudAlert> alertSerde = AvroSerdes.fraudAlert(schemaRegistryUrl);
@@ -41,17 +45,17 @@ public final class FraudTopology {
                 Topics.TRANSACTIONS, Consumed.with(keySerde, txnSerde));
 
         transactions
-                .filter((accountId, txn) -> FraudRules.amountRuleFires(txn, threshold))
-                .mapValues(txn -> FraudRules.toAmountAlert(txn, threshold))
+                .filter((accountId, txn) -> FraudRules.amountRuleFires(txn, amountThreshold))
+                .mapValues(txn -> FraudRules.toAmountAlert(txn, amountThreshold))
                 .to(Topics.FRAUD_ALERTS, Produced.with(keySerde, alertSerde));
 
-        // anchor state store: the Stage 2 velocity rule counts transactions per
-        // account inside a 60 s window using this store
+        builder.addStateStore(VelocityProcessor.storeBuilder());
         transactions
-                .groupByKey()
-                .count(Materialized.<String, Long, KeyValueStore<Bytes, byte[]>>as(ACCOUNT_TXN_COUNT_STORE)
-                        .withKeySerde(keySerde)
-                        .withValueSerde(Serdes.Long()));
+                .processValues(
+                        () -> new VelocityProcessor(velocityWindowSeconds * 1000L, velocityLimit),
+                        VelocityProcessor.STORE_NAME)
+                .filter((accountId, alert) -> alert != null)
+                .to(Topics.FRAUD_ALERTS, Produced.with(keySerde, alertSerde));
 
         return builder.build();
     }

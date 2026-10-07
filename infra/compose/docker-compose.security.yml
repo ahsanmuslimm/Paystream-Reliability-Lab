@@ -1,0 +1,170 @@
+# PayStream Reliability Lab - security overlay (profile: security, Stage 2)
+# Implements WP2.1/WP2.2 per ADR-0002: listener names and ports are unchanged;
+# the protocols switch to mTLS (BROKER inter-broker, CONTROLLER quorum) and
+# SASL_SSL with SCRAM-SHA-512 (client listeners). StandardAuthorizer enforces
+# the Document 03 ACL matrix with default deny (FR-08, FR-09).
+#
+# Prerequisites (host, in order):
+#   make certs    -> security/certs/{ca,broker-*,clients/*}
+#   make scram    -> security/secrets/{scram-credentials.env,jaas/*.env,interpolation.env}
+#
+# The kafka-setup one-shot container registers SCRAM users, then applies
+# acls.yaml and topics.yaml before any service starts. Run with:
+#   make up-secure   (compose -f core -f monitoring -f security up)
+
+name: paystream
+
+x-broker-security-env: &broker-security-env
+  # --- ADR-0002: same listener names/ports, secured protocols ---
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:SSL,BROKER:SSL,PLAINTEXT:SASL_SSL,PLAINTEXT_HOST:SASL_SSL"
+  KAFKA_LISTENERS: "BROKER://0.0.0.0:29094,CONTROLLER://0.0.0.0:29093,PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:19092"
+  KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
+  # --- authorisation: default deny, StandardAuthorizer (KRaft) ---
+  KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+  KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+  # broker certs carry CN=broker-N (mTLS inter-broker/controller principals);
+  # kafka-setup is the cert-based bootstrap identity; svc-admin-ci is the
+  # SCRAM admin used by CI and the apply scripts.
+  KAFKA_SUPER_USERS: "User:CN=broker-1;User:CN=broker-2;User:CN=broker-3;User:CN=kafka-setup;User:svc-admin-ci"
+  # --- client authentication: SCRAM-SHA-512 (server side needs no JAAS) ---
+  KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+  # --- TLS material: mount targets are identical on every broker, so the
+  #     same global ssl.* configs serve all four listeners ---
+  KAFKA_SSL_KEYSTORE_LOCATION: /etc/kafka/secrets/broker.p12
+  KAFKA_SSL_KEYSTORE_TYPE: PKCS12
+  KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD:-paystream-lab}
+  KAFKA_SSL_TRUSTSTORE_LOCATION: /etc/kafka/secrets/truststore.p12
+  KAFKA_SSL_TRUSTSTORE_TYPE: PKCS12
+  KAFKA_SSL_TRUSTSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD:-paystream-lab}
+  KAFKA_LISTENER_NAME_BROKER_SSL_CLIENT_AUTH: required
+  KAFKA_LISTENER_NAME_CONTROLLER_SSL_CLIENT_AUTH: required
+  KAFKA_LISTENER_NAME_PLAINTEXT_SSL_CLIENT_AUTH: none
+
+services:
+  kafka-1:
+    environment:
+      <<: *broker-security-env
+      # per-broker advertised listeners (unchanged ports, BROKER added)
+      KAFKA_ADVERTISED_LISTENERS: "BROKER://kafka-1:29094,PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:${KAFKA_1_HOST_PORT:-19091}"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29094 --command-config /etc/kafka/secrets/command.properties >/dev/null 2>&1"]
+    ports:
+      - "${KAFKA_BROKER_HOST_PORT:-19094}:29094"
+    volumes:
+      - ../../security/certs/broker-1/broker-1.p12:/etc/kafka/secrets/broker.p12:ro
+      - ../../security/certs/broker-1/truststore.p12:/etc/kafka/secrets/truststore.p12:ro
+      - ../../security/certs/broker-1/command.properties:/etc/kafka/secrets/command.properties:ro
+
+  kafka-2:
+    environment:
+      <<: *broker-security-env
+      KAFKA_ADVERTISED_LISTENERS: "BROKER://kafka-2:29094,PLAINTEXT://kafka-2:29092,PLAINTEXT_HOST://localhost:${KAFKA_2_HOST_PORT:-19092}"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29094 --command-config /etc/kafka/secrets/command.properties >/dev/null 2>&1"]
+    volumes:
+      - ../../security/certs/broker-2/broker-2.p12:/etc/kafka/secrets/broker.p12:ro
+      - ../../security/certs/broker-2/truststore.p12:/etc/kafka/secrets/truststore.p12:ro
+      - ../../security/certs/broker-2/command.properties:/etc/kafka/secrets/command.properties:ro
+
+  kafka-3:
+    environment:
+      <<: *broker-security-env
+      KAFKA_ADVERTISED_LISTENERS: "BROKER://kafka-3:29094,PLAINTEXT://kafka-3:29092,PLAINTEXT_HOST://localhost:${KAFKA_3_HOST_PORT:-19093}"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29094 --command-config /etc/kafka/secrets/command.properties >/dev/null 2>&1"]
+    volumes:
+      - ../../security/certs/broker-3/broker-3.p12:/etc/kafka/secrets/broker.p12:ro
+      - ../../security/certs/broker-3/truststore.p12:/etc/kafka/secrets/truststore.p12:ro
+      - ../../security/certs/broker-3/command.properties:/etc/kafka/secrets/command.properties:ro
+
+  # One-shot bootstrap: registers SCRAM users (as cert principal CN=kafka-setup,
+  # a superuser) then applies the ACL matrix and topic catalogue as svc-admin-ci.
+  # Every credential-dependent service waits for it to complete successfully.
+  kafka-setup:
+    image: ${KAFKA_IMAGE:-apache/kafka:4.0.0}
+    container_name: kafka-setup
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/opt/paystream/security/scripts/bootstrap-security.sh"]
+    volumes:
+      - ../../security/scripts:/opt/paystream/security/scripts:ro
+      - ../../kafka-config:/opt/paystream/kafka-config:ro
+      - ../../security/certs/clients/kafka-setup:/etc/kafka/certs/kafka-setup:ro
+      - ../../security/certs/ca:/etc/kafka/certs/ca:ro
+      - ../../security/secrets:/opt/paystream/security/secrets:ro
+    restart: "no"
+
+  schema-registry:
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
+    environment:
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "SASL_SSL://kafka-1:29092,SASL_SSL://kafka-2:29092,SASL_SSL://kafka-3:29092"
+      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: SASL_SSL
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: SCRAM-SHA-512
+      SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_LOCATION: /etc/kafka/secrets/truststore.p12
+      SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_TYPE: PKCS12
+      SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_PASSWORD: ${KAFKA_SSL_PASSWORD:-paystream-lab}
+    env_file:
+      - ../../security/secrets/jaas/schema-registry.env
+    volumes:
+      - ../../security/certs/ca/truststore.p12:/etc/kafka/secrets/truststore.p12:ro
+
+  txn-producer:
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
+    environment:
+      SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL: SASL_SSL
+      SPRING_KAFKA_PROPERTIES_SASL_MECHANISM: SCRAM-SHA-512
+    env_file:
+      - ../../security/secrets/jaas/txn-producer.env
+
+  fraud-detector:
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
+    environment:
+      SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL: SASL_SSL
+      SPRING_KAFKA_PROPERTIES_SASL_MECHANISM: SCRAM-SHA-512
+    env_file:
+      - ../../security/secrets/jaas/fraud-detector.env
+
+  notifier:
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
+    environment:
+      SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL: SASL_SSL
+      SPRING_KAFKA_PROPERTIES_SASL_MECHANISM: SCRAM-SHA-512
+    env_file:
+      - ../../security/secrets/jaas/notifier.env
+
+  # kafka-exporter (from the monitoring overlay) reconfigured for SASL_SSL.
+  # The password comes from security/secrets/interpolation.env via the second
+  # --env-file that `make up-secure` passes to compose.
+  kafka-exporter:
+    command:
+      - "--kafka.server=kafka-1:29092"
+      - "--kafka.server=kafka-2:29092"
+      - "--kafka.server=kafka-3:29092"
+      - "--web.listen-address=:9308"
+      - "--sasl.enabled"
+      - "--sasl.username=svc-monitor"
+      - "--sasl.password=${SVC_MONITOR_PASSWORD:-}"
+      - "--sasl.mechanism=scram-sha512"
+      - "--tls.enabled"
+      - "--tls.ca-file=/etc/kafka/secrets/ca.crt"
+    volumes:
+      - ../../security/certs/ca/ca.crt:/etc/kafka/secrets/ca.crt:ro

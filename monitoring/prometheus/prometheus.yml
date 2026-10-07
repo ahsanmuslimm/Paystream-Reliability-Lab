@@ -1,4 +1,22 @@
-# PayStream Reliability Lab - Prometheus scrape configuration (MVP)
+# PayStream Reliability Lab - Prometheus configuration (WP2.5)
+# Collects the streaming platform, the monitoring components themselves, and
+# the pushed certificate-expiry metric (scripts/cert-expiry-check.sh).
+# JMX broker metrics (request latency, controller state) activate as soon as
+# the broker javaagent wiring from docs/operations/deployment-guide.md is
+# enabled; the rules reference the standard exporter metric names.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: kafka-exporter
     static_configs:
@@ -19,6 +37,29 @@ scrape_configs:
     static_configs:
       - targets: ["notifier:8083"]
 
+  - job_name: node-exporter
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # Broker JMX metrics - enabled with the javaagent wiring documented in the
+  # deployment guide (WP2.5 deliverable monitoring/jmx/broker.yml).
+  # - job_name: kafka-broker-jmx
+  #   static_configs:
+  #     - targets: ["kafka-1:7071", "kafka-2:7071", "kafka-3:7071"]

@@ -1,7 +1,8 @@
 # PayStream Reliability Lab - monitoring overlay (profile: monitoring)
-# MVP observability (WP1.7): kafka-exporter for broker/topic/consumer-group
-# metrics, Prometheus collection, provisioned Grafana dashboard.
-# Full alerting (Alertmanager, JMX exporter, Loki) arrives in Stage 2 (WP2.5).
+# WP1.7 MVP + WP2.5 full observability: kafka-exporter, Prometheus with the
+# complete alert rule set, Alertmanager, Pushgateway (certificate expiry),
+# node-exporter (host disk), Loki + Promtail for structured logs, and
+# provisioned Grafana dashboards.
 
 services:
   kafka-exporter:
@@ -27,6 +28,9 @@ services:
     image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.4.1}
     container_name: prometheus
     restart: unless-stopped
+    depends_on:
+      - alertmanager
+      - pushgateway
     volumes:
       - ../../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../../monitoring/prometheus/rules:/etc/prometheus/rules:ro
@@ -37,12 +41,63 @@ services:
     ports:
       - "${PROMETHEUS_HOST_PORT:-9090}:9090"
 
+  alertmanager:
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.28.1}
+    container_name: alertmanager
+    restart: unless-stopped
+    volumes:
+      - ../../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "${ALERTMANAGER_HOST_PORT:-9093}:9093"
+
+  pushgateway:
+    image: ${PUSHGATEWAY_IMAGE:-prom/pushgateway:v1.11.0}
+    container_name: pushgateway
+    restart: unless-stopped
+    ports:
+      - "${PUSHGATEWAY_HOST_PORT:-9091}:9091"
+
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.9.1}
+    container_name: node-exporter
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+    pid: host
+    volumes:
+      - /:/host:ro
+    ports:
+      - "${NODE_EXPORTER_HOST_PORT:-9100}:9100"
+
+  loki:
+    image: ${LOKI_IMAGE:-grafana/loki:3.4.2}
+    container_name: loki
+    restart: unless-stopped
+    volumes:
+      - ../../monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "${LOKI_HOST_PORT:-3100}:3100"
+
+  promtail:
+    image: ${PROMTAIL_IMAGE:-grafana/promtail:3.4.2}
+    container_name: promtail
+    restart: unless-stopped
+    depends_on:
+      - loki
+    volumes:
+      - ../../monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "${PROMTAIL_HOST_PORT:-9080}:9080"
+
   grafana:
     image: ${GRAFANA_IMAGE:-grafana/grafana:12.0.0}
     container_name: grafana
     restart: unless-stopped
     depends_on:
       - prometheus
+      - loki
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
@@ -57,3 +112,4 @@ services:
 volumes:
   prometheus-data:
   grafana-data:
+  loki-data:

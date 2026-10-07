@@ -16,7 +16,9 @@ public class KafkaStreamsConfig {
     @Bean
     public Topology fraudTopology(StreamsBuilder builder,
                                   @Value("${paystream.fraud.amount-threshold:10000}") BigDecimal threshold,
+                                  @Value("${paystream.fraud.velocity-limit:5}") int velocityLimit,
+                                  @Value("${paystream.fraud.velocity-window-seconds:60}") long velocityWindowSeconds,
                                   @Value("${paystream.schema-registry-url:http://schema-registry:8081}") String schemaRegistryUrl) {
-        return FraudTopology.amountRuleTopology(builder, threshold, schemaRegistryUrl);
+        return FraudTopology.fraudTopology(builder, threshold, velocityLimit, velocityWindowSeconds, schemaRegistryUrl);
     }
 }

@@ -2,8 +2,9 @@
 .env
 *.env.local
 
-# Certificates and private keys (never commit)
+# Certificates, SCRAM credentials and generated client properties (never commit)
 security/certs/
+security/secrets/
 *.p12
 *.jks
 *.key
